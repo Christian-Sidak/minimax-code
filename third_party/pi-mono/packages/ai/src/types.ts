@@ -500,6 +500,18 @@ export interface AnthropicMessagesCompat {
 	forceAdaptiveThinking?: boolean;
 	/** Whether to replay empty thinking signatures as `signature: ""` instead of converting thinking to text. Default: false. */
 	allowEmptySignature?: boolean;
+	/**
+	 * Whether the model supports `thinking.block_binding` with
+	 * `prefix_mismatch_behavior: "drop_block"` (requires the
+	 * `thinking-binding-controls-2026-08-01` beta header). When enabled the
+	 * provider drops stale signed-thinking blocks instead of rejecting the
+	 * request with `prefix_binding_mismatch`, which makes context compaction
+	 * safe on Opus 5.5 and Sonnet 5.5. Enabled by default for models whose IDs
+	 * are listed in `THINKING_BLOCK_BINDING_MODEL_IDS`; can be overridden per
+	 * provider instance.
+	 * Default: false (or true for supported built-in model IDs).
+	 */
+	supportsThinkingBlockBinding?: boolean;
 }
 
 /**

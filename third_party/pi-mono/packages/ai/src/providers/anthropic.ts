@@ -163,9 +163,13 @@ export type AnthropicThinkingDisplay = "summarized" | "omitted";
 
 export const DEFAULT_THINKING_MODEL_IDS = [
 	"claude-opus-5",
+	"claude-opus-5-5",
 	"claude-sonnet-5",
+	"claude-sonnet-5-5",
 	"claude-fable-5",
+	"claude-fable-5-1",
 	"claude-mythos-5",
+	"claude-mythos-5-1",
 	"claude-mythos-preview",
 ] as const;
 
@@ -180,6 +184,29 @@ export function isDefaultThinkingModelId(value: unknown): boolean {
 
 const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
+const THINKING_BINDING_CONTROLS_BETA = "thinking-binding-controls-2026-08-01";
+
+/**
+ * Model IDs that support thinking block binding (prefix_mismatch_behavior).
+ * These models require the `thinking-binding-controls-2026-08-01` beta header
+ * and `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` to avoid
+ * `prefix_binding_mismatch` errors after context compaction.
+ */
+export const THINKING_BLOCK_BINDING_MODEL_IDS = [
+	"claude-opus-5-5",
+	"claude-sonnet-5-5",
+	"claude-fable-5-1",
+	"claude-mythos-5-1",
+] as const;
+
+export function supportsThinkingBlockBinding(model: Model<"anthropic-messages">): boolean {
+	if (typeof model.compat?.supportsThinkingBlockBinding === "boolean") {
+		return model.compat.supportsThinkingBlockBinding;
+	}
+	if (typeof model.id !== "string") return false;
+	const normalizedId = model.id.trim().toLowerCase().replace(/\[1m\]$/u, "");
+	return (THINKING_BLOCK_BINDING_MODEL_IDS as readonly string[]).includes(normalizedId);
+}
 
 function getAnthropicCompat(
 	model: Model<"anthropic-messages">,
@@ -196,6 +223,7 @@ function getAnthropicCompat(
 		supportsCacheControlOnTools: model.compat?.supportsCacheControlOnTools ?? !isFireworks,
 		supportsTemperature: model.compat?.supportsTemperature ?? true,
 		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
+		supportsThinkingBlockBinding: supportsThinkingBlockBinding(model),
 	};
 }
 
@@ -876,6 +904,9 @@ function createClient(
 	if (needsInterleavedBeta) {
 		betaFeatures.push(INTERLEAVED_THINKING_BETA);
 	}
+	if (supportsThinkingBlockBinding(model)) {
+		betaFeatures.push(THINKING_BINDING_CONTROLS_BETA);
+	}
 	const fetchOption = fetch ? { fetch } : {};
 
 	if (model.provider === "cloudflare-ai-gateway") {
@@ -1035,6 +1066,14 @@ function buildParams(
 			// Default to "summarized" so Opus 4.7 and Mythos Preview behave like
 			// older Claude 4 models (whose API default is also "summarized").
 			const display: AnthropicThinkingDisplay = options.thinkingDisplay ?? "summarized";
+			// Models that support thinking block binding need an explicit adaptive
+			// thinking object with block_binding so the API drops stale signed
+			// thinking blocks instead of rejecting with prefix_binding_mismatch.
+			// This is injected after any host payload hooks so caller-supplied
+			// block_binding is preserved when present.
+			const blockBinding = supportsThinkingBlockBinding(model)
+				? { prefix_mismatch_behavior: "drop_block" as const }
+				: undefined;
 			if (isDefaultThinkingModelId(model.id)) {
 				// Thinking is already enabled by the model default; only effort
 				// belongs on the wire. `thinkingEnabled` stays an internal control
@@ -1042,9 +1081,21 @@ function buildParams(
 				if (options.effort) {
 					params.output_config = { effort: options.effort };
 				}
+				if (blockBinding) {
+					// Send an explicit adaptive thinking object to carry block_binding.
+					params.thinking = {
+						type: "adaptive",
+						display,
+						...(blockBinding ? { block_binding: blockBinding } : {}),
+					} as unknown as NonNullable<MessageCreateParamsStreaming["thinking"]>;
+				}
 			} else if (model.compat?.forceAdaptiveThinking === true) {
 				// Adaptive thinking: Claude decides when and how much to think.
-				params.thinking = { type: "adaptive", display };
+				params.thinking = {
+					type: "adaptive",
+					display,
+					...(blockBinding ? { block_binding: blockBinding } : {}),
+				} as unknown as NonNullable<MessageCreateParamsStreaming["thinking"]>;
 				if (options.effort) {
 					// The Anthropic SDK types can lag newly supported effort values such as "xhigh".
 					params.output_config =

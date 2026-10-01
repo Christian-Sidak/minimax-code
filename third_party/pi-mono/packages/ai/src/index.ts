@@ -12,6 +12,8 @@ export type { AnthropicEffort, AnthropicOptions, AnthropicThinkingDisplay } from
 export {
 	DEFAULT_THINKING_MODEL_IDS,
 	isDefaultThinkingModelId,
+	THINKING_BLOCK_BINDING_MODEL_IDS,
+	supportsThinkingBlockBinding,
 } from "./providers/anthropic.ts";
 export type { AzureOpenAIResponsesOptions } from "./providers/azure-openai-responses.ts";
 export * from "./providers/faux.ts";
